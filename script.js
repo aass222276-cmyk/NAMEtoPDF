@@ -147,7 +147,7 @@ for (let i = 0; i < pagesToProcess.length; i++) {
   );
 
   // ---- iOS対策（PNG維持）：長辺制限＋白背景で透明つぶし ----
-  const MAX_EMBED_PX = 1800; // 2000〜3000が安定。まだ白/黒ならさらに下げる
+  const MAX_EMBED_PX = 1000; // 2000〜3000が安定。まだ白/黒ならさらに下げる
   let embW = slice.widthPx;
   let embH = slice.heightPx;
 
