@@ -43,15 +43,34 @@ if (!imageLoader || !btnTampage || !btnMihiraki || !imageCanvas || !statusEl || 
         reader.onload = (event) => {
             const img = new Image();
             img.onload = () => {
-                imageCanvas.width = img.width; imageCanvas.height = img.height;
-                ctx.drawImage(img, 0, 0);
-                imagePreview.src = event.target.result;
-                imagePreviewContainer.style.display = 'block';
-                isImageLoaded = true; uploadedImageWidth = img.width; uploadedImageHeight = img.height;
-                btnTampage.disabled = false;
-                btnMihiraki.disabled = false;
-                setStatus('画像の準備が完了しました。モードを選択してください。', 'success');
-            };
+    // iOS/タッチMacは厳しめ、PCは緩め
+    const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+                  (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+    const BASE_MAX = isIOS ? 4096 : 8192;
+
+    const scale = Math.min(1, BASE_MAX / Math.max(img.width, img.height));
+    const cw = Math.max(1, Math.round(img.width  * scale));
+    const ch = Math.max(1, Math.round(img.height * scale));
+
+    // 原寸を直接載せず、まず安全サイズへ縮小して基準キャンバスに保持
+    imageCanvas.width = cw;
+    imageCanvas.height = ch;
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high';
+    ctx.drawImage(img, 0, 0, img.width, img.height, 0, 0, cw, ch);
+
+    // 以後の座標計算は縮小後の寸法を基準にする
+    uploadedImageWidth = cw;
+    uploadedImageHeight = ch;
+
+    imagePreview.src = event.target.result;
+    imagePreviewContainer.style.display = 'block';
+    isImageLoaded = true;
+    btnTampage.disabled = false;
+    btnMihiraki.disabled = false;
+    setStatus('画像の準備が完了しました。モードを選択してください。', 'success');
+};
+
             img.onerror = () => { setStatus('画像ファイルの読み込みに失敗しました。', 'error'); isImageLoaded = false; };
             img.src = event.target.result;
         };
@@ -137,7 +156,7 @@ for (let i = 0; i < pagesToProcess.length; i++) {
     : getSliceData('Mihiraki', pageData[0]);
   if (slice.widthPx <= 0 || slice.heightPx <= 0) continue;
 
-  // 原寸で切り抜き
+  // ここでの imageCanvas は①で安全サイズに縮小済み
   cropCanvas.width = slice.widthPx;
   cropCanvas.height = slice.heightPx;
   cropCtx.drawImage(
@@ -146,25 +165,27 @@ for (let i = 0; i < pagesToProcess.length; i++) {
     0, 0, slice.widthPx, slice.heightPx
   );
 
-  // ---- iOS対策（PNG維持）：長辺制限＋白背景で透明つぶし ----
-  const MAX_EMBED_PX = 100; // 2000〜3000が安定。まだ白/黒ならさらに下げる
+  // ---- iOS対策：長辺制限＋白背景（PNG維持）----
+  const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+                (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  const MAX_EMBED_PX = isIOS ? 2000 : 2800; // まだ白/黒なら 1800 まで下げる
+
   let embW = slice.widthPx;
   let embH = slice.heightPx;
-
-  // 長辺制限で縮小（画素が大きいとiOSで白/黒化）
   if (embW > MAX_EMBED_PX || embH > MAX_EMBED_PX) {
     const s = Math.min(MAX_EMBED_PX / embW, MAX_EMBED_PX / embH);
     embW = Math.max(1, Math.round(embW * s));
     embH = Math.max(1, Math.round(embH * s));
   }
 
-  // 透明を白に統一してからPNG化
   const embedCanvas = document.createElement('canvas');
   embedCanvas.width = embW;
   embedCanvas.height = embH;
   const embedCtx = embedCanvas.getContext('2d', { alpha: false }); // 不透明キャンバス
+  // 透明つぶし（黒化/白紙回避）
   embedCtx.fillStyle = '#ffffff';
   embedCtx.fillRect(0, 0, embW, embH);
+  // 高品質縮小
   embedCtx.imageSmoothingEnabled = true;
   embedCtx.imageSmoothingQuality = 'high';
   embedCtx.drawImage(
@@ -176,10 +197,9 @@ for (let i = 0; i < pagesToProcess.length; i++) {
   const imgData = embedCanvas.toDataURL('image/png'); // PNGのまま
   const imgRatio = embW / embH;
 
-  // ページ追加
   if (i > 0) { pdf.addPage('a4', orientation); }
 
-  // 版面にフィット（中心配置）
+  // A4版面にフィット（中心配置）
   let newWidth, newHeight;
   if ((maxWidth / maxHeight) > imgRatio) {
     newHeight = maxHeight; newWidth = maxHeight * imgRatio;
@@ -189,7 +209,6 @@ for (let i = 0; i < pagesToProcess.length; i++) {
   const offsetX = (a4Width - newWidth) / 2;
   const offsetY = (a4Height - newHeight) / 2;
 
-  // 貼り込み（PNGを明示）
   pdf.addImage(imgData, 'PNG', offsetX, offsetY, newWidth, newHeight);
 
   if (i % 10 === 0 && i > 0) {
@@ -197,6 +216,7 @@ for (let i = 0; i < pagesToProcess.length; i++) {
     await new Promise(resolve => setTimeout(resolve, 0));
   }
 }
+
 // === ここまで置換 ===
 
         pdf.save(inputs.filename);
