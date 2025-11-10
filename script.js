@@ -129,65 +129,76 @@ async function processPDF(mode) {
         // iOS白紙対策パラメータ
         const MAX_EMBED_PX = 2400; // 2000〜3000が安全。厳しければさらに下げる
 
-        for (let i = 0; i < pagesToProcess.length; i++) {
-            const pageData = pagesToProcess[i];
-            const slice = (mode === 'Tampage') ? getSliceData('Tampage', pageData) : getSliceData('Mihiraki', pageData[0]);
-            if (slice.widthPx <= 0 || slice.heightPx <= 0) continue;
+        // === ここから置換（ループ全体） ===
+for (let i = 0; i < pagesToProcess.length; i++) {
+  const pageData = pagesToProcess[i];
+  const slice = (mode === 'Tampage')
+    ? getSliceData('Tampage', pageData)
+    : getSliceData('Mihiraki', pageData[0]);
+  if (slice.widthPx <= 0 || slice.heightPx <= 0) continue;
 
-            // 原寸で切り抜き
-            cropCanvas.width = slice.widthPx;
-            cropCanvas.height = slice.heightPx;
-            cropCtx.drawImage(
-                imageCanvas,
-                slice.xPx, slice.yPx, slice.widthPx, slice.heightPx,
-                0, 0, slice.widthPx, slice.heightPx
-            );
+  // 原寸で切り抜き
+  cropCanvas.width = slice.widthPx;
+  cropCanvas.height = slice.heightPx;
+  cropCtx.drawImage(
+    imageCanvas,
+    slice.xPx, slice.yPx, slice.widthPx, slice.heightPx,
+    0, 0, slice.widthPx, slice.heightPx
+  );
 
-            // === iOS対策：埋め込みサイズを抑えて白背景JPEG化 ===
-            let embW = slice.widthPx;
-            let embH = slice.heightPx;
-            if (embW > MAX_EMBED_PX || embH > MAX_EMBED_PX) {
-                const scale = Math.min(MAX_EMBED_PX / embW, MAX_EMBED_PX / embH);
-                embW = Math.max(1, Math.round(embW * scale));
-                embH = Math.max(1, Math.round(embH * scale));
-            }
-            const embedCanvas = document.createElement('canvas');
-            embedCanvas.width = embW;
-            embedCanvas.height = embH;
-            const embedCtx = embedCanvas.getContext('2d', { alpha: false });
-            embedCtx.imageSmoothingEnabled = true;
-            embedCtx.imageSmoothingQuality = 'high';
-            // 透明つぶし（黒化/白紙回避）
-            embedCtx.fillStyle = '#ffffff';
-            embedCtx.fillRect(0, 0, embW, embH);
-            // 縮小描画
-            embedCtx.drawImage(
-                cropCanvas,
-                0, 0, cropCanvas.width, cropCanvas.height,
-                0, 0, embW, embH
-            );
-            // 軽量・互換優先（iOS安定）：JPEGで埋め込み
-            const imgData = embedCanvas.toDataURL('image/jpeg', 0.92);
-            const imgFormat = 'JPEG';
+  // ---- iOS対策（PNG維持）：長辺制限＋白背景で透明つぶし ----
+  const MAX_EMBED_PX = 1800; // 2000〜3000が安定。まだ白/黒ならさらに下げる
+  let embW = slice.widthPx;
+  let embH = slice.heightPx;
 
-            if (i > 0) { pdf.addPage('a4', orientation); }
-            const imgRatio = embW / embH;
-            let newWidth, newHeight;
-            if ((maxWidth / maxHeight) > imgRatio) {
-                newHeight = maxHeight; newWidth = maxHeight * imgRatio;
-            } else {
-                newWidth = maxWidth; newHeight = maxWidth / imgRatio;
-            }
-            const offsetX = (a4Width - newWidth) / 2;
-            const offsetY = (a4Height - newHeight) / 2;
+  // 長辺制限で縮小（画素が大きいとiOSで白/黒化）
+  if (embW > MAX_EMBED_PX || embH > MAX_EMBED_PX) {
+    const s = Math.min(MAX_EMBED_PX / embW, MAX_EMBED_PX / embH);
+    embW = Math.max(1, Math.round(embW * s));
+    embH = Math.max(1, Math.round(embH * s));
+  }
 
-            pdf.addImage(imgData, imgFormat, offsetX, offsetY, newWidth, newHeight);
+  // 透明を白に統一してからPNG化
+  const embedCanvas = document.createElement('canvas');
+  embedCanvas.width = embW;
+  embedCanvas.height = embH;
+  const embedCtx = embedCanvas.getContext('2d', { alpha: false }); // 不透明キャンバス
+  embedCtx.fillStyle = '#ffffff';
+  embedCtx.fillRect(0, 0, embW, embH);
+  embedCtx.imageSmoothingEnabled = true;
+  embedCtx.imageSmoothingQuality = 'high';
+  embedCtx.drawImage(
+    cropCanvas,
+    0, 0, cropCanvas.width, cropCanvas.height,
+    0, 0, embW, embH
+  );
 
-            if (i % 10 === 0 && i > 0) {
-                setStatus(`[${mode}] ${i} / ${pagesToProcess.length} ページ処理中...`, 'processing');
-                await new Promise(resolve => setTimeout(resolve, 0));
-            }
-        }
+  const imgData = embedCanvas.toDataURL('image/png'); // PNGのまま
+  const imgRatio = embW / embH;
+
+  // ページ追加
+  if (i > 0) { pdf.addPage('a4', orientation); }
+
+  // 版面にフィット（中心配置）
+  let newWidth, newHeight;
+  if ((maxWidth / maxHeight) > imgRatio) {
+    newHeight = maxHeight; newWidth = maxHeight * imgRatio;
+  } else {
+    newWidth = maxWidth; newHeight = maxWidth / imgRatio;
+  }
+  const offsetX = (a4Width - newWidth) / 2;
+  const offsetY = (a4Height - newHeight) / 2;
+
+  // 貼り込み（PNGを明示）
+  pdf.addImage(imgData, 'PNG', offsetX, offsetY, newWidth, newHeight);
+
+  if (i % 10 === 0 && i > 0) {
+    setStatus(`[${mode}] ${i} / ${pagesToProcess.length} ページ処理中...`, 'processing');
+    await new Promise(resolve => setTimeout(resolve, 0));
+  }
+}
+// === ここまで置換 ===
+
         pdf.save(inputs.filename);
         setStatus(`完了: ${inputs.filename} がダウンロードされました。`, 'success');
     } catch (error) {
