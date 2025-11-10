@@ -146,7 +146,7 @@ async function processPDF(mode) {
         const cropCtx = cropCanvas.getContext('2d');
 
         // iOS白紙対策パラメータ
-        const MAX_EMBED_PX = 2400; // 2000〜3000が安全。厳しければさらに下げる
+        const MAX_EMBED_PX = 3000; // 2000〜3000が安全。厳しければさらに下げる
 
         // === ここから置換（ループ全体） ===
 for (let i = 0; i < pagesToProcess.length; i++) {
