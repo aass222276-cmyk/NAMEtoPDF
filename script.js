@@ -43,33 +43,48 @@ if (!imageLoader || !btnTampage || !btnMihiraki || !imageCanvas || !statusEl || 
         reader.onload = (event) => {
             const img = new Image();
             img.onload = () => {
-    // iOS/タッチMacは厳しめ、PCは緩め
-    const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) ||
-                  (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
-    const BASE_MAX = isIOS ? 4096 : 8192;
+  const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+                (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
 
-    const scale = Math.min(1, BASE_MAX / Math.max(img.width, img.height));
-    const cw = Math.max(1, Math.round(img.width  * scale));
-    const ch = Math.max(1, Math.round(img.height * scale));
+  // --- デスクトップ最大値を“軽く”探る（上限16384、失敗時8192にフォールバック） ---
+  const desktopProbeMax = (() => {
+    try {
+      const test = document.createElement('canvas');
+      const steps = [16384, 12288, 8192]; // だめなら段階的に下げる
+      for (const dim of steps) {
+        test.width = dim; test.height = 1;
+        const ctx = test.getContext('2d');
+        if (ctx) { return dim; }
+      }
+    } catch (_) {}
+    return 8192;
+  })();
 
-    // 原寸を直接載せず、まず安全サイズへ縮小して基準キャンバスに保持
-    imageCanvas.width = cw;
-    imageCanvas.height = ch;
-    ctx.imageSmoothingEnabled = true;
-    ctx.imageSmoothingQuality = 'high';
-    ctx.drawImage(img, 0, 0, img.width, img.height, 0, 0, cw, ch);
+  // iOSは4096、デスクトップは検出値（典型は8192、強い環境で16384）
+  const BASE_MAX = isIOS ? 4096 : desktopProbeMax;
 
-    // 以後の座標計算は縮小後の寸法を基準にする
-    uploadedImageWidth = cw;
-    uploadedImageHeight = ch;
+  const scale = Math.min(1, BASE_MAX / Math.max(img.width, img.height));
+  const cw = Math.max(1, Math.round(img.width  * scale));
+  const ch = Math.max(1, Math.round(img.height * scale));
 
-    imagePreview.src = event.target.result;
-    imagePreviewContainer.style.display = 'block';
-    isImageLoaded = true;
-    btnTampage.disabled = false;
-    btnMihiraki.disabled = false;
-    setStatus('画像の準備が完了しました。モードを選択してください。', 'success');
+  imageCanvas.width = cw;
+  imageCanvas.height = ch;
+  const ctx = imageCanvas.getContext('2d');
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = 'high';
+  ctx.drawImage(img, 0, 0, img.width, img.height, 0, 0, cw, ch);
+
+  uploadedImageWidth = cw;
+  uploadedImageHeight = ch;
+
+  imagePreview.src = event.target.result;
+  imagePreviewContainer.style.display = 'block';
+  isImageLoaded = true;
+  btnTampage.disabled = false;
+  btnMihiraki.disabled = false;
+  setStatus('画像の準備が完了しました。モードを選択してください。', 'success');
 };
+
 
             img.onerror = () => { setStatus('画像ファイルの読み込みに失敗しました。', 'error'); isImageLoaded = false; };
             img.src = event.target.result;
