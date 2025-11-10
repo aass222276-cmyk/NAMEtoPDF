@@ -2,7 +2,7 @@
 // まずはオンラインで一度アクセスしてCDNをキャッシュします。
 
 // ★ 修正: バージョンを更新
-const CACHE_NAME = 'namepdf-v3.5.7'; 
+const CACHE_NAME = 'namepdf-v3.5.8'; 
 const urlsToCache = [
   './',
   './index.html',

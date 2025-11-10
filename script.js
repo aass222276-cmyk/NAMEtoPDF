@@ -46,7 +46,7 @@ if (!imageLoader || !btnTampage || !btnMihiraki || !imageCanvas || !statusEl || 
     // iOS/タッチMacは厳しめ、PCは緩め
     const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) ||
                   (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
-    const BASE_MAX = isIOS ? 4096 : 8192;
+    const BASE_MAX = isIOS ? 6144 : 8192;
 
     const scale = Math.min(1, BASE_MAX / Math.max(img.width, img.height));
     const cw = Math.max(1, Math.round(img.width  * scale));
