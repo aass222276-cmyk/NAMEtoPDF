@@ -27,7 +27,7 @@ imageCanvas = document.getElementById('imageCanvas');
 // ★ 安全のため、DOM取得失敗時のガードを追加
 if (!imageLoader || !btnTampage || !btnMihiraki || !imageCanvas || !statusEl || !pdfNameTampage || !startPageTampage || !endPageTampage || !pdfNameMihiraki || !startPageMihiraki || !endPageMihiraki) {
     console.error('必要なDOM要素の取得に失敗しました。HTMLのIDが正しいか確認してください。');
-    if (statusEl) { // statusEl自体がnullでないか確認
+    if (statusEl) {
         statusEl.textContent = 'アプリの初期化に失敗しました。ページを再読み込みしてください。';
         statusEl.className = 'error';
     }
@@ -38,7 +38,6 @@ if (!imageLoader || !btnTampage || !btnMihiraki || !imageCanvas || !statusEl || 
     generateOrderMaps();
     
     imageLoader.addEventListener('change', (e) => {
-        // (中略 ... 画像読み込み)
         const file = e.target.files[0]; if (!file) return;
         const reader = new FileReader();
         reader.onload = (event) => {
@@ -76,7 +75,7 @@ function setStatus(message, type = '') {
 
 async function processPDF(mode) {
     try {
-        // (jsPDFCtor のロジック ... 変更なし)
+        // jsPDFコンストラクタ検出
         const jsPDFCtor =
           (window.jspdf && (window.jspdf.jsPDF || window.jspdf.default)) // v2 UMD
           || window.jsPDF;                                                // v1 Global
@@ -94,8 +93,6 @@ async function processPDF(mode) {
         btnMihiraki.disabled = true;
         
         const orientation = (mode === 'Mihiraki') ? 'landscape' : 'portrait';
-        
-        // (new jsPDFCtor を使用 ... 変更なし)
         const pdf = new jsPDFCtor({ orientation: orientation, unit: 'pt', format: 'a4' });
 
         const a4Width = pdf.internal.pageSize.getWidth();
@@ -104,10 +101,9 @@ async function processPDF(mode) {
         const maxWidth = a4Width - (margin * 2);
         const maxHeight = a4Height - (margin * 2);
 
-        // (処理対象ページのリスト作成 ... 変更なし)
+        // 対象ページ列挙
         setStatus(`[${mode}] 処理対象ページを計算中... (2/3)`, 'processing');
         const pagesToProcess = [];
-        // (中略 ... pagesToProcess の作成)
         if (mode === 'Tampage') {
             for (let i = inputs.start; i <= inputs.end; i++) { pagesToProcess.push(i); }
         } else {
@@ -125,14 +121,20 @@ async function processPDF(mode) {
             return;
         }
 
-        // (ページごとに切り抜き & PDFに追加 ... 変更なし)
+        // ページごとに切り抜き & PDFに追加
         setStatus(`[${mode}] 全 ${pagesToProcess.length} ページを生成中... (3/3)`, 'processing');
         const cropCanvas = document.createElement('canvas');
         const cropCtx = cropCanvas.getContext('2d');
+
+        // iOS白紙対策パラメータ
+        const MAX_EMBED_PX = 2400; // 2000〜3000が安全。厳しければさらに下げる
+
         for (let i = 0; i < pagesToProcess.length; i++) {
             const pageData = pagesToProcess[i];
             const slice = (mode === 'Tampage') ? getSliceData('Tampage', pageData) : getSliceData('Mihiraki', pageData[0]);
             if (slice.widthPx <= 0 || slice.heightPx <= 0) continue;
+
+            // 原寸で切り抜き
             cropCanvas.width = slice.widthPx;
             cropCanvas.height = slice.heightPx;
             cropCtx.drawImage(
@@ -140,24 +142,47 @@ async function processPDF(mode) {
                 slice.xPx, slice.yPx, slice.widthPx, slice.heightPx,
                 0, 0, slice.widthPx, slice.heightPx
             );
-            
-            // ★★★ iPad黒塗りバグ修正 1: 'image/png' に変更 ★★★
-            const imgData = cropCanvas.toDataURL('image/png');
-            
+
+            // === iOS対策：埋め込みサイズを抑えて白背景JPEG化 ===
+            let embW = slice.widthPx;
+            let embH = slice.heightPx;
+            if (embW > MAX_EMBED_PX || embH > MAX_EMBED_PX) {
+                const scale = Math.min(MAX_EMBED_PX / embW, MAX_EMBED_PX / embH);
+                embW = Math.max(1, Math.round(embW * scale));
+                embH = Math.max(1, Math.round(embH * scale));
+            }
+            const embedCanvas = document.createElement('canvas');
+            embedCanvas.width = embW;
+            embedCanvas.height = embH;
+            const embedCtx = embedCanvas.getContext('2d', { alpha: false });
+            embedCtx.imageSmoothingEnabled = true;
+            embedCtx.imageSmoothingQuality = 'high';
+            // 透明つぶし（黒化/白紙回避）
+            embedCtx.fillStyle = '#ffffff';
+            embedCtx.fillRect(0, 0, embW, embH);
+            // 縮小描画
+            embedCtx.drawImage(
+                cropCanvas,
+                0, 0, cropCanvas.width, cropCanvas.height,
+                0, 0, embW, embH
+            );
+            // 軽量・互換優先（iOS安定）：JPEGで埋め込み
+            const imgData = embedCanvas.toDataURL('image/jpeg', 0.92);
+            const imgFormat = 'JPEG';
+
             if (i > 0) { pdf.addPage('a4', orientation); }
-            const imgRatio = slice.widthPx / slice.heightPx;
+            const imgRatio = embW / embH;
             let newWidth, newHeight;
-            if ( (maxWidth / maxHeight) > imgRatio ) {
+            if ((maxWidth / maxHeight) > imgRatio) {
                 newHeight = maxHeight; newWidth = maxHeight * imgRatio;
             } else {
                 newWidth = maxWidth; newHeight = maxWidth / imgRatio;
             }
             const offsetX = (a4Width - newWidth) / 2;
             const offsetY = (a4Height - newHeight) / 2;
-            
-            // ★★★ iPad黒塗りバグ修正 2: 'PNG' に変更 ★★★
-            pdf.addImage(imgData, 'PNG', offsetX, offsetY, newWidth, newHeight);
-            
+
+            pdf.addImage(imgData, imgFormat, offsetX, offsetY, newWidth, newHeight);
+
             if (i % 10 === 0 && i > 0) {
                 setStatus(`[${mode}] ${i} / ${pagesToProcess.length} ページ処理中...`, 'processing');
                 await new Promise(resolve => setTimeout(resolve, 0));
@@ -175,8 +200,6 @@ async function processPDF(mode) {
 }
 
 // (ヘルパー関数 ... 変更なし)
-// (getValidatedInputs, generateCoordMapRatio, generateOrderMaps)
-// (中略)
 function getValidatedInputs(mode) {
     let filename, start, end, startInput, endInput, defaultStart, defaultEnd;
     if (mode === 'Tampage') {
@@ -204,6 +227,7 @@ function getValidatedInputs(mode) {
     }
     return { filename, start, end };
 }
+
 function generateCoordMapRatio() {
     coordMapRatio = [];
     const w = CONFIG.BOX_WIDTH_PX / CONFIG.REF_WIDTH;
@@ -225,6 +249,7 @@ function generateCoordMapRatio() {
         currentX_Ratio += w + gapToAdd_Ratio;
     }
 }
+
 function generateOrderMaps() {
     orderMapTampage = [null];
     let id = 1;
@@ -246,6 +271,7 @@ function generateOrderMaps() {
         }
     }
 }
+
 function getColRowFromTampageID(id) {
     if (id < 1 || id > CONFIG.MAX_PAGES || !orderMapTampage[id]) { throw new Error(`無効なページID ${id}`); }
     return orderMapTampage[id];
