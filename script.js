@@ -183,7 +183,7 @@ for (let i = 0; i < pagesToProcess.length; i++) {
   // ---- iOS対策：長辺制限＋白背景（PNG維持）----
   const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) ||
                 (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
-  const MAX_EMBED_PX = isIOS ? 2000 : 2800; // まだ白/黒なら 1800 まで下げる
+  const MAX_EMBED_PX = isIOS ? 2000 : 2000; // まだ白/黒なら 1800 まで下げる
 
   let embW = slice.widthPx;
   let embH = slice.heightPx;
